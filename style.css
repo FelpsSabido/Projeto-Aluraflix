@@ -1,0 +1,85 @@
+body {
+  color: white;
+  background: black;
+  margin: 0;
+  font-family: "Chakra Petch", sans-serif;
+  margin-bottom: 100px;
+}
+
+header {
+  border-bottom: solid 2px #fff;
+  padding: 20px;
+  font-size: 32px;
+  color: #fff;
+  text-align: center;
+  font-weight: 700;
+}
+
+.chamada {
+  background: #111;
+  padding: 80px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 40px;
+}
+
+.chamada-texto {
+  max-width: 420px;
+}
+
+h1 {
+  font-size: 40px;
+  margin: 0 0 10px;
+}
+
+p {
+  font-size: 20px;
+  color: #ccc;
+  margin: 0;
+}
+
+.video-wrapper iframe {
+  width: 560px;
+  height: 315px;
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.categoria {
+  padding: 0 20px;
+  margin-top: 50px;
+}
+
+.categoria h2 {
+  color: #fff;
+  border-left: 4px solid #fff;
+  padding-left: 8px;
+  margin-bottom: 16px;
+}
+
+.categoria-videos {
+  display: flex;
+  overflow-x: auto;
+  gap: 20px;
+  padding-bottom: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: #555 transparent;
+}
+
+.categoria-videos::-webkit-scrollbar {
+  height: 6px;
+}
+
+.categoria-videos::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+
+.categoria-videos iframe {
+  flex: 0 0 auto;
+  width: 240px;
+  height: 135px;
+  border-radius: 8px;
+  border: none;
+}
