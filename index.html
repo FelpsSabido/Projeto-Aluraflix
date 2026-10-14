@@ -1,39 +1,93 @@
-<!doctype html>
+
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FELPSFLIX</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#101318">
+  <title>Mão Robótica | MediaPipe + Arduino</title>
   <link rel="stylesheet" href="style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 </head>
+
 <body>
-  <header>FELPSFLIX</header>
+  <main class="container">
+    <header>
+      <p class="eyebrow">PROJETO DE ROBÓTICA</p>
+      <h1>Mão Robótica</h1>
+      <p class="subtitle">
+        Visão computacional · MediaPipe · Arduino Uno
+      </p>
+    </header>
 
-  <section class="chamada">
-    <div class="chamada-texto">
-      <h1>EPIC: THE MUSICAL — FILME COMPLETO</h1>
-      <p>#epicthemusical</p>
-    </div>
-    <div class="video-wrapper">
-      <iframe src="https://www.youtube.com/embed/jJ9vtKtilG8"
-        title="Epic The Musical - Full Movie" frameborder="0"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowfullscreen></iframe>
-    </div>
-  </section>
+    <section class="camera-card">
+      <div class="camera-container">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div id="cameraPlaceholder" class="placeholder">
+          Aguardando câmera...
+        </div>
+      </div>
 
-  <section class="categoria">
-    <h2>Músicas de Epic: The Musical</h2>
-    <div class="categoria-videos">
-      <iframe src="https://www.youtube.com/embed/qYDms9Z-02A" title="Vídeo 1" frameborder="0" allowfullscreen></iframe>
-      <iframe src="https://www.youtube.com/embed/RAVfp4YZ8nA" title="Vídeo 2" frameborder="0" allowfullscreen></iframe>
-      <iframe src="https://www.youtube.com/embed/UGYny6uI2bA" title="Vídeo 3" frameborder="0" allowfullscreen></iframe>
-      <iframe src="https://www.youtube.com/embed/hNdvp9Qo8PA" title="Vídeo 4" frameborder="0" allowfullscreen></iframe>
-      <iframe src="https://www.youtube.com/embed/UjcV3CYfCsM" title="Vídeo 5" frameborder="0" allowfullscreen></iframe>
-    </div>
-  </section>
+      <p id="status" class="status" role="status">
+        Preparando reconhecimento...
+      </p>
+    </section>
+
+    <section class="metrics">
+      <article class="metric">
+        <span>FLEXÃO DO INDICADOR</span>
+        <strong id="flexao">--°</strong>
+      </article>
+
+      <article class="metric">
+        <span>ÂNGULO DO SERVO</span>
+        <strong id="angulo">90°</strong>
+      </article>
+
+      <article class="metric">
+        <span>PONTOS DETECTADOS</span>
+        <strong id="pontos">0 / 21</strong>
+      </article>
+    </section>
+
+    <section class="connection-card">
+      <p class="eyebrow">CONTROLE FÍSICO</p>
+      <h2>Conexão com Arduino</h2>
+
+      <p class="description">
+        Conecte o Arduino Uno por USB para controlar o servo.
+      </p>
+
+      <div class="connection-actions">
+        <button id="conectarArduino">Conectar Arduino</button>
+        <button id="desconectarArduino" class="secondary" disabled>
+          Desconectar
+        </button>
+      </div>
+
+      <p id="statusArduino" class="status" role="status">
+        Arduino desconectado
+      </p>
+
+      <div class="test-buttons">
+        <button class="secondary" id="teste30" disabled>Testar 30°</button>
+        <button class="secondary" id="teste90" disabled>Testar 90°</button>
+        <button class="secondary" id="teste150" disabled>Testar 150°</button>
+      </div>
+
+      <p class="note">
+        Teste com o eixo livre. Não force o servo nem prenda os dedos
+        mecânicos antes de validar o movimento.
+      </p>
+    </section>
+
+    <footer>
+      <span class="indicator"></span>
+      <span>Reconhecimento em tempo real</span>
+    </footer>
+  </main>
+
+  <script src="script.js"></script>
 </body>
 </html>
