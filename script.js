@@ -23,17 +23,6 @@ const botoesTeste = [
 const ANGULO_MIN = 30;
 const ANGULO_MAX = 150;
 const INTERVALO_ENVIO = 100;
-const VARIACAO_MINIMA = 3;
-
-let portaSerial = null;
-let escritorSerial = null;
-let hands = null;
-
-let ultimoAnguloEnviado = null;
-let ultimoEnvio = 0;
-let anguloPendente = null;
-let enviando = false;
-let conectado = false;
 
 const conexoes = [
   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -43,6 +32,15 @@ const conexoes = [
   [0, 17], [17, 18], [18, 19], [19, 20],
   [5, 9], [9, 13], [13, 17]
 ];
+
+let portaSerial = null;
+let escritorSerial = null;
+let hands = null;
+let conectado = false;
+let enviando = false;
+let ultimaMensagem = "";
+let ultimoEnvio = 0;
+let mensagemPendente = null;
 
 function atualizarBotoes() {
   botoesTeste.forEach(botao => {
@@ -57,9 +55,9 @@ function desenharMao(mao) {
   ctx.lineWidth = 3;
   ctx.strokeStyle = "#00ff88";
 
-  for (const [indiceA, indiceB] of conexoes) {
-    const a = mao[indiceA];
-    const b = mao[indiceB];
+  for (const [aIndice, bIndice] of conexoes) {
+    const a = mao[aIndice];
+    const b = mao[bIndice];
 
     ctx.beginPath();
     ctx.moveTo(a.x * canvas.width, a.y * canvas.height);
@@ -82,6 +80,7 @@ function desenharMao(mao) {
   });
 }
 
+// Calcula o ângulo entre três pontos 2D.
 function calcularAngulo(a, b, c) {
   const abx = a.x - b.x;
   const aby = a.y - b.y;
@@ -104,12 +103,35 @@ function calcularAngulo(a, b, c) {
   return Math.acos(cos) * 180 / Math.PI;
 }
 
+// Dedo estendido -> servo perto de 30°.
+// Dedo dobrado -> servo perto de 150°.
 function mapearParaServo(flexao) {
-  const valor = 30 + (180 - flexao);
+  const valor = 30 + ((180 - flexao) / 110) * 120;
 
   return Math.round(
     Math.max(ANGULO_MIN, Math.min(ANGULO_MAX, valor))
   );
+}
+
+function calcularAngulos(mao) {
+  // Indicador: MCP 5, PIP 6, DIP 7.
+  const flexaoIndicador =
+    calcularAngulo(mao[5], mao[6], mao[7]);
+
+  // Polegar: MCP 2, IP 3, ponta 4.
+  const flexaoDedao =
+    calcularAngulo(mao[2], mao[3], mao[4]);
+
+  // Médio: MCP 9, PIP 10, DIP 11.
+  const flexaoMedio =
+    calcularAngulo(mao[9], mao[10], mao[11]);
+
+  return {
+    indicador: mapearParaServo(flexaoIndicador),
+    dedao: mapearParaServo(flexaoDedao),
+    medio: mapearParaServo(flexaoMedio),
+    flexaoIndicador: Math.round(flexaoIndicador)
+  };
 }
 
 async function processarFilaSerial() {
@@ -119,50 +141,51 @@ async function processarFilaSerial() {
 
   try {
     while (
-      anguloPendente !== null &&
+      mensagemPendente !== null &&
       escritorSerial &&
       conectado
     ) {
-      const valor = anguloPendente;
-      anguloPendente = null;
+      const mensagem = mensagemPendente;
+      mensagemPendente = null;
 
-      const dados = new TextEncoder().encode(
-        Math.round(valor) + "\n"
+      await escritorSerial.write(
+        new TextEncoder().encode(mensagem + "\n")
       );
-
-      await escritorSerial.write(dados);
     }
   } catch (erro) {
-    console.error("Falha ao enviar ângulo:", erro);
+    console.error("Erro na comunicação serial:", erro);
     statusArduino.textContent =
-      "Falha na comunicação serial. Verifique o cabo.";
+      "Falha ao enviar comandos. Confira o cabo USB.";
   } finally {
     enviando = false;
   }
 }
 
-function enviarAngulo(angulo) {
-  if (!escritorSerial || !conectado) return;
+function enviarAngulos(angulos, forcar = false) {
+  if (!conectado || !escritorSerial) return;
 
   const agora = Date.now();
-  const valor = Math.round(
-    Math.max(ANGULO_MIN, Math.min(ANGULO_MAX, angulo))
-  );
 
-  if (
-    ultimoAnguloEnviado !== null &&
-    Math.abs(valor - ultimoAnguloEnviado) < VARIACAO_MINIMA
-  ) {
-    return;
-  }
+  if (agora - ultimoEnvio < INTERVALO_ENVIO && !forcar) return;
 
-  if (agora - ultimoEnvio < INTERVALO_ENVIO) return;
+  const mensagem =
+    `${angulos.indicador},${angulos.dedao},${angulos.medio}`;
 
-  ultimoAnguloEnviado = valor;
+  if (mensagem === ultimaMensagem && !forcar) return;
+
+  ultimaMensagem = mensagem;
   ultimoEnvio = agora;
-  anguloPendente = valor;
+  mensagemPendente = mensagem;
 
   processarFilaSerial();
+}
+
+async function enviarTeste(angulo) {
+  enviarAngulos({
+    indicador: angulo,
+    dedao: angulo,
+    medio: angulo
+  }, true);
 }
 
 botaoConectar.addEventListener("click", async () => {
@@ -186,11 +209,12 @@ botaoConectar.addEventListener("click", async () => {
 
     escritorSerial = portaSerial.writable.getWriter();
     conectado = true;
-    ultimoAnguloEnviado = null;
+    ultimaMensagem = "";
 
-    statusArduino.textContent = "Arduino conectado a 9600 baud.";
+    statusArduino.textContent =
+      "Arduino conectado — 3 servos ativos.";
   } catch (erro) {
-    console.error("Erro ao conectar:", erro);
+    console.error(erro);
 
     statusArduino.textContent =
       "Não foi possível conectar: " + erro.message;
@@ -203,7 +227,7 @@ botaoConectar.addEventListener("click", async () => {
 
 botaoDesconectar.addEventListener("click", async () => {
   conectado = false;
-  anguloPendente = null;
+  mensagemPendente = null;
 
   try {
     if (escritorSerial) {
@@ -218,24 +242,24 @@ botaoDesconectar.addEventListener("click", async () => {
 
     statusArduino.textContent = "Arduino desconectado.";
   } catch (erro) {
-    console.error("Erro ao desconectar:", erro);
+    console.error(erro);
     statusArduino.textContent =
-      "Erro ao desconectar. Verifique a conexão USB.";
+      "Erro ao desconectar: " + erro.message;
   } finally {
     atualizarBotoes();
   }
 });
 
 document.getElementById("teste30").addEventListener(
-  "click", () => enviarAngulo(30)
+  "click", () => enviarTeste(30)
 );
 
 document.getElementById("teste90").addEventListener(
-  "click", () => enviarAngulo(90)
+  "click", () => enviarTeste(90)
 );
 
 document.getElementById("teste150").addEventListener(
-  "click", () => enviarAngulo(150)
+  "click", () => enviarTeste(150)
 );
 
 function aoDetectar(resultado) {
@@ -244,7 +268,6 @@ function aoDetectar(resultado) {
 
   if (!largura || !altura) return;
 
-  // Mantém as coordenadas do canvas iguais às do vídeo original.
   if (canvas.width !== largura || canvas.height !== altura) {
     canvas.width = largura;
     canvas.height = altura;
@@ -268,19 +291,19 @@ function aoDetectar(resultado) {
 
   pontosTexto.textContent = mao.length + " / 21";
 
-  const flexao = calcularAngulo(mao[5], mao[6], mao[8]);
-  const anguloServo = mapearParaServo(flexao);
+  const angulos = calcularAngulos(mao);
 
-  flexaoTexto.textContent = Math.round(flexao) + "°";
-  anguloTexto.textContent = anguloServo + "°";
+  flexaoTexto.textContent =
+    angulos.flexaoIndicador + "°";
+
+  anguloTexto.textContent =
+    angulos.indicador + "°";
 
   status.textContent = conectado
-    ? "Mão detectada — controle ativo."
+    ? `Controle ativo — indicador ${angulos.indicador}°, dedão ${angulos.dedao}°, médio ${angulos.medio}°.`
     : "Mão detectada — conecte o Arduino.";
 
-  if (conectado) {
-    enviarAngulo(anguloServo);
-  }
+  enviarAngulos(angulos);
 }
 
 async function iniciarMediaPipe() {
@@ -328,7 +351,7 @@ async function iniciarCamera() {
   try {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error(
-        "Câmera indisponível. Abra a página em um contexto HTTPS seguro."
+        "Câmera indisponível. Abra a página em HTTPS."
       );
     }
 
@@ -349,7 +372,7 @@ async function iniciarCamera() {
 
     iniciarMediaPipe();
   } catch (erro) {
-    console.error("Erro na câmera:", erro);
+    console.error(erro);
     status.textContent = "Erro ao iniciar câmera: " + erro.message;
     placeholder.textContent = "Não foi possível iniciar a câmera.";
   }
