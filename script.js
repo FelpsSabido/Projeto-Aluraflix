@@ -13,7 +13,6 @@ const pontosTexto = document.getElementById("pontos");
 
 const botaoConectar = document.getElementById("conectarArduino");
 const botaoDesconectar = document.getElementById("desconectarArduino");
-
 const botaoTeste30 = document.getElementById("teste30");
 const botaoTeste90 = document.getElementById("teste90");
 const botaoTeste150 = document.getElementById("teste150");
@@ -27,7 +26,6 @@ const conexoes = [
   [5, 9], [9, 13], [13, 17]
 ];
 
-// Ajuste estes limites se algum dedo atingir seu limite mecânico antes.
 const LIMITES = {
   indicador: { minimo: 0, maximo: 180 },
   dedao: { minimo: 0, maximo: 180 },
@@ -39,57 +37,54 @@ const MUDANCA_MINIMA = 2;
 
 let portaSerial = null;
 let escritorSerial = null;
+let leitorSerial = null;
 let hands = null;
 let conectado = false;
-let enviando = false;
-let mensagemPendente = null;
+let lendoSerial = false;
 let ultimaMensagem = "";
 let ultimoEnvio = 0;
 let ultimosAngulos = null;
+let ultimoAnguloCalculado = null;
+let modoTeste = false;
+
+function limitar(valor, minimo, maximo) {
+  return Math.max(minimo, Math.min(maximo, valor));
+}
 
 function atualizarBotoes() {
-  botaoConectar.disabled = conectado;
-  botaoDesconectar.disabled = !conectado;
+  if (botaoConectar) botaoConectar.disabled = conectado;
+  if (botaoDesconectar) botaoDesconectar.disabled = !conectado;
 
   [botaoTeste30, botaoTeste90, botaoTeste150].forEach(botao => {
     if (botao) botao.disabled = !conectado;
   });
 }
 
-function limitar(valor, minimo, maximo) {
-  return Math.max(minimo, Math.min(maximo, valor));
-}
-
 function desenharMao(mao) {
   ctx.strokeStyle = "#00ff88";
   ctx.lineWidth = 3;
 
-  for (const [indiceA, indiceB] of conexoes) {
-    const a = mao[indiceA];
-    const b = mao[indiceB];
-
+  for (const [i, j] of conexoes) {
     ctx.beginPath();
-    ctx.moveTo(a.x * canvas.width, a.y * canvas.height);
-    ctx.lineTo(b.x * canvas.width, b.y * canvas.height);
+    ctx.moveTo(mao[i].x * canvas.width, mao[i].y * canvas.height);
+    ctx.lineTo(mao[j].x * canvas.width, mao[j].y * canvas.height);
     ctx.stroke();
   }
 
-  mao.forEach((ponto, indice) => {
+  mao.forEach((ponto, i) => {
     ctx.beginPath();
     ctx.arc(
       ponto.x * canvas.width,
       ponto.y * canvas.height,
-      indice === 0 ? 8 : 5,
+      i === 0 ? 8 : 5,
       0,
       Math.PI * 2
     );
-
-    ctx.fillStyle = indice === 0 ? "#ffcc00" : "#ffffff";
+    ctx.fillStyle = i === 0 ? "#ffcc00" : "#ffffff";
     ctx.fill();
   });
 }
 
-// Calcula o ângulo interno formado por três pontos.
 function calcularAngulo(a, b, c) {
   const abx = a.x - b.x;
   const aby = a.y - b.y;
@@ -110,41 +105,29 @@ function calcularAngulo(a, b, c) {
   return Math.acos(cos) * 180 / Math.PI;
 }
 
-// Articulação reta (~180°) -> servo em 0°.
-// Articulação dobrada (~70°) -> servo próximo de 180°.
 function mapearParaServo(flexao, nome) {
   const limites = LIMITES[nome];
 
-  const flexaoNormalizada = limitar(
-    (180 - flexao) / 110,
-    0,
-    1
-  );
+  // Articulação reta -> servo 0.
+  // Articulação dobrada -> servo 180.
+  const proporcao = limitar((180 - flexao) / 110, 0, 1);
 
   return Math.round(
     limites.minimo +
-    flexaoNormalizada * (limites.maximo - limites.minimo)
+    proporcao * (limites.maximo - limites.minimo)
   );
 }
 
 function calcularAngulos(mao) {
-  // Indicador: articulação proximal 5, média 6, distal 7.
-  const articulacaoIndicador =
-    calcularAngulo(mao[5], mao[6], mao[7]);
-
-  // Dedão: articulações 2, 3 e ponta 4.
-  const articulacaoDedao =
-    calcularAngulo(mao[2], mao[3], mao[4]);
-
-  // Médio: articulação proximal 9, média 10, distal 11.
-  const articulacaoMedio =
-    calcularAngulo(mao[9], mao[10], mao[11]);
+  const anguloIndicador = calcularAngulo(mao[5], mao[6], mao[7]);
+  const anguloDedao = calcularAngulo(mao[2], mao[3], mao[4]);
+  const anguloMedio = calcularAngulo(mao[9], mao[10], mao[11]);
 
   return {
-    indicador: mapearParaServo(articulacaoIndicador, "indicador"),
-    dedao: mapearParaServo(articulacaoDedao, "dedao"),
-    medio: mapearParaServo(articulacaoMedio, "medio"),
-    flexaoIndicador: Math.round(180 - articulacaoIndicador)
+    indicador: mapearParaServo(anguloIndicador, "indicador"),
+    dedao: mapearParaServo(anguloDedao, "dedao"),
+    medio: mapearParaServo(anguloMedio, "medio"),
+    flexaoIndicador: Math.round(180 - anguloIndicador)
   };
 }
 
@@ -158,34 +141,35 @@ function angulosMudaram(novos, antigos) {
   );
 }
 
-async function processarFilaSerial() {
-  if (enviando || !escritorSerial || !conectado) return;
-
-  enviando = true;
+async function enviarMensagem(mensagem) {
+  if (!conectado || !escritorSerial) {
+    if (statusArduino) statusArduino.textContent = "Conecte o Arduino primeiro.";
+    return false;
+  }
 
   try {
-    while (
-      mensagemPendente !== null &&
-      escritorSerial &&
-      conectado
-    ) {
-      const mensagem = mensagemPendente;
-      mensagemPendente = null;
+    await escritorSerial.write(
+      new TextEncoder().encode(mensagem + "\n")
+    );
 
-      await escritorSerial.write(
-        new TextEncoder().encode(mensagem + "\n")
-      );
+    if (statusArduino) {
+      statusArduino.textContent = "Comando enviado: " + mensagem;
     }
+
+    console.log("Enviado ao Arduino:", mensagem);
+    return true;
   } catch (erro) {
-    console.error("Falha ao enviar para o Arduino:", erro);
-    statusArduino.textContent =
-      "Falha no envio. Confira a conexão USB.";
-  } finally {
-    enviando = false;
+    console.error("Erro ao enviar comando:", erro);
+
+    if (statusArduino) {
+      statusArduino.textContent = "Erro no envio: " + erro.message;
+    }
+
+    return false;
   }
 }
 
-function enviarAngulos(angulos, forcar = false) {
+async function enviarAngulos(angulos, forcar = false) {
   if (!conectado || !escritorSerial) return;
 
   const agora = Date.now();
@@ -198,20 +182,41 @@ function enviarAngulos(angulos, forcar = false) {
 
   if (!forcar && mensagem === ultimaMensagem) return;
 
-  ultimaMensagem = mensagem;
-  ultimoEnvio = agora;
-  ultimosAngulos = { ...angulos };
-  mensagemPendente = mensagem;
+  // Evita que a câmera envie comandos durante o teste manual.
+  if (modoTeste && !forcar) return;
 
-  processarFilaSerial();
+  const enviado = await enviarMensagem(mensagem);
+
+  if (enviado) {
+    ultimaMensagem = mensagem;
+    ultimoEnvio = Date.now();
+    ultimosAngulos = { ...angulos };
+  }
 }
 
 async function testarServos(angulo) {
-  enviarAngulos({
+  if (!conectado) return;
+
+  modoTeste = true;
+
+  const enviado = await enviarAngulos({
     indicador: angulo,
     dedao: angulo,
     medio: angulo
   }, true);
+
+  if (enviado) {
+    statusArduino.textContent =
+      `Teste enviado: indicador ${angulo}°, dedão ${angulo}°, médio ${angulo}°.`;
+
+    // Retoma o controle pela câmera após o teste.
+    setTimeout(() => {
+      modoTeste = false;
+      ultimosAngulos = null;
+    }, 1200);
+  } else {
+    modoTeste = false;
+  }
 }
 
 if (botaoTeste30) {
@@ -224,65 +229,122 @@ if (botaoTeste150) {
   botaoTeste150.addEventListener("click", () => testarServos(150));
 }
 
-botaoConectar.addEventListener("click", async () => {
-  if (!("serial" in navigator)) {
-    statusArduino.textContent =
-      "Este navegador não oferece acesso serial.";
-    return;
-  }
+async function lerRespostasArduino() {
+  if (!portaSerial || !portaSerial.readable || lendoSerial) return;
 
-  botaoConectar.disabled = true;
+  lendoSerial = true;
 
   try {
-    statusArduino.textContent = "Selecione o Arduino na janela...";
+    leitorSerial = portaSerial.readable.getReader();
+    let buffer = "";
 
-    portaSerial = await navigator.serial.requestPort();
-    await portaSerial.open({ baudRate: 9600 });
+    while (conectado) {
+      const { value, done } = await leitorSerial.read();
 
-    if (!portaSerial.writable) {
-      throw new Error("A porta serial não permite escrita.");
+      if (done) break;
+      if (!value) continue;
+
+      buffer += new TextDecoder().decode(value);
+
+      const linhas = buffer.split(/\r?\n/);
+      buffer = linhas.pop() || "";
+
+      for (const linha of linhas) {
+        const resposta = linha.trim();
+        if (!resposta) continue;
+
+        console.log("Arduino respondeu:", resposta);
+
+        if (statusArduino) {
+          statusArduino.textContent = "Arduino: " + resposta;
+        }
+      }
     }
-
-    escritorSerial = portaSerial.writable.getWriter();
-    conectado = true;
-    ultimaMensagem = "";
-    ultimosAngulos = null;
-
-    statusArduino.textContent =
-      "Arduino conectado — indicador, dedão e médio ativos.";
-
-    atualizarBotoes();
   } catch (erro) {
-    console.error(erro);
-    statusArduino.textContent = "Não foi possível conectar: " + erro.message;
-    conectado = false;
-    atualizarBotoes();
-  }
-});
-
-botaoDesconectar.addEventListener("click", async () => {
-  conectado = false;
-  mensagemPendente = null;
-
-  try {
-    if (escritorSerial) {
-      escritorSerial.releaseLock();
-      escritorSerial = null;
-    }
-
-    if (portaSerial) {
-      await portaSerial.close();
-      portaSerial = null;
-    }
-
-    statusArduino.textContent = "Arduino desconectado.";
-  } catch (erro) {
-    console.error(erro);
-    statusArduino.textContent = "Erro ao desconectar: " + erro.message;
+    if (conectado) console.error("Erro lendo Arduino:", erro);
   } finally {
-    atualizarBotoes();
+    if (leitorSerial) {
+      try {
+        leitorSerial.releaseLock();
+      } catch (_) {}
+      leitorSerial = null;
+    }
+
+    lendoSerial = false;
   }
-});
+}
+
+if (botaoConectar) {
+  botaoConectar.addEventListener("click", async () => {
+    if (!("serial" in navigator)) {
+      statusArduino.textContent =
+        "Este navegador não oferece acesso serial. Use um navegador compatível com Web Serial.";
+      return;
+    }
+
+    botaoConectar.disabled = true;
+
+    try {
+      statusArduino.textContent = "Selecione o Arduino...";
+
+      portaSerial = await navigator.serial.requestPort();
+      await portaSerial.open({ baudRate: 9600 });
+
+      if (!portaSerial.writable) {
+        throw new Error("A porta serial não permite escrita.");
+      }
+
+      escritorSerial = portaSerial.writable.getWriter();
+      conectado = true;
+      ultimaMensagem = "";
+      ultimosAngulos = null;
+
+      atualizarBotoes();
+      statusArduino.textContent = "Arduino conectado. Teste os servos.";
+
+      // Inicia a leitura das respostas sem bloquear a interface.
+      lerRespostasArduino();
+    } catch (erro) {
+      console.error(erro);
+      statusArduino.textContent = "Erro ao conectar: " + erro.message;
+
+      conectado = false;
+      atualizarBotoes();
+    }
+  });
+}
+
+if (botaoDesconectar) {
+  botaoDesconectar.addEventListener("click", async () => {
+    conectado = false;
+    modoTeste = false;
+
+    try {
+      if (leitorSerial) {
+        try {
+          await leitorSerial.cancel();
+        } catch (_) {}
+      }
+
+      if (escritorSerial) {
+        escritorSerial.releaseLock();
+        escritorSerial = null;
+      }
+
+      if (portaSerial) {
+        await portaSerial.close();
+        portaSerial = null;
+      }
+
+      statusArduino.textContent = "Arduino desconectado.";
+    } catch (erro) {
+      console.error(erro);
+      statusArduino.textContent = "Erro ao desconectar: " + erro.message;
+    } finally {
+      atualizarBotoes();
+    }
+  });
+}
 
 function aoDetectar(resultado) {
   const largura = video.videoWidth;
@@ -308,11 +370,11 @@ function aoDetectar(resultado) {
   }
 
   const mao = maos[0];
-
   desenharMao(mao);
   pontosTexto.textContent = `${mao.length} / 21`;
 
   const angulos = calcularAngulos(mao);
+  ultimoAnguloCalculado = angulos;
 
   flexaoTexto.textContent = `${angulos.flexaoIndicador}°`;
   anguloTexto.textContent = `${angulos.indicador}°`;
@@ -343,8 +405,7 @@ async function iniciarMediaPipe() {
     });
 
     hands.onResults(aoDetectar);
-
-    status.textContent = "MediaPipe carregado. Detectando mão...";
+    status.textContent = "Reconhecimento carregado. Mostre sua mão.";
 
     async function analisar() {
       if (video.readyState >= 2 && hands) {
@@ -368,7 +429,7 @@ async function iniciarMediaPipe() {
 async function iniciarCamera() {
   try {
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("A câmera exige uma página em contexto seguro, como HTTPS.");
+      throw new Error("A câmera exige uma página HTTPS ou contexto seguro.");
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -383,9 +444,7 @@ async function iniciarCamera() {
     video.srcObject = stream;
     await video.play();
 
-    if (placeholder) {
-      placeholder.classList.add("hidden");
-    }
+    if (placeholder) placeholder.classList.add("hidden");
 
     status.textContent = "Carregando reconhecimento da mão...";
     iniciarMediaPipe();
